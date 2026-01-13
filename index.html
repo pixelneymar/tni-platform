@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TNI - Transaction Network Intelligence</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    :root{--bg:#0d1117;--bg2:#161b22;--bg3:#21262d;--border:#30363d;--text:#e6edf3;--muted:#8b949e;--accent:#58a6ff;--green:#3fb950;--red:#f85149}
+    body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:var(--bg);color:var(--text);overflow:hidden;height:100vh}
+    #app{display:flex;flex-direction:column;height:100vh}
+    header{height:56px;background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 20px;gap:20px}
+    .logo h1{font-size:20px}.logo span{font-size:11px;color:var(--muted)}
+    #search{width:280px;height:36px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px 12px;color:var(--text);outline:none}
+    .btn{height:32px;padding:0 12px;background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--muted);cursor:pointer}
+    .btn:hover{background:var(--bg3);color:var(--text)}.btn:disabled{opacity:0.5}
+    main{flex:1;display:flex;overflow:hidden}
+    #viz{flex:1}#sidebar{width:280px;background:var(--bg2);border-left:1px solid var(--border);padding:20px;overflow-y:auto}
+    .metric{margin-bottom:12px}.metric-label{font-size:11px;color:var(--muted);text-transform:uppercase}.metric-value{font-size:18px;font-weight:600}
+    .pos{color:var(--green)}.neg{color:var(--red)}
+    #tooltip{position:fixed;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:12px;pointer-events:none;opacity:0;z-index:1000}
+    #tooltip.show{opacity:1}
+    footer{height:32px;background:var(--bg2);border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 20px;font-size:12px;color:var(--muted)}
+    .loading{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:9999}
+    </style>
+  </head>
+  <body>
+    <div id="load" class="loading"><div>Loading TNI...</div></div>
+  <div id="app" style="display:none">
+    <header>
+      <div class="logo"><h1>TNI</h1><span>Transaction Network Intelligence</span></div>
+    <div id="crumb">Global</div>
+    <input id="search" placeholder="Search...">
+    <button id="back" class="btn" disabled>Back</button>button>
+    <button id="reset" class="btn">Reset</button>button>
+    </header>
+  <main><div id="viz"></div><aside id="sidebar">Hover over a country</aside>aside></main>
+  <footer><span id="count">195 Countries</span><span>2024</span></footer>
+  </div>
+  <div id="tooltip"></div>
+  <script>
+    let data,node,stack=[],sim,svg,g;
+    const fmt=v=>v>=1000?`$${(v/1000).toFixed(2)}T`:`$${v.toFixed(1)}B`;
+    const fmtG=g=>`${g>=0?'+':''}${g.toFixed(1)}%`;
+    async function init(){
+      try{const r=await fetch('data/data_master_hierarchy.json');data=await r.json();
+          document.getElementById('load').style.display='none';
+          document.getElementById('app').style.display='flex';
+          setup();render(data.children,data);}
+      catch(e){document.getElementById('load').innerHTML='<div style="color:#f85149">Error: '+e.message+'</div>';}}
+    function setup(){
+      const c=document.getElementById('viz'),w=c.clientWidth,h=c.clientHeight;
+      svg=d3.select('#viz').append('svg').attr('width',w).attr('height',h);g=svg.append('g');
+      window.onresize=()=>{svg.attr('width',c.clientWidth).attr('height',c.clientHeight);if(sim)sim.force('center',d3.forceCenter(c.clientWidth/2,c.clientHeight/2)).alpha(0.3).restart();};}
+    function render(d,p){
+      node=p;if(sim)sim.stop();g.selectAll('*').remove();if(!d?.length)return;
+      const c=document.getElementById('viz'),w=c.clientWidth,h=c.clientHeight;
+      const vols=d.map(x=>x.volume),rS=d3.scaleSqrt().domain([Math.min(...vols),Math.max(...vols)]).range([12,80]);
+      const nodes=d.map(x=>({...x,x:w/2+(Math.random()-0.5)*200,y:h/2+(Math.random()-0.5)*200,r:rS(x.volume)}));
+      sim=d3.forceSimulation(nodes).force('center',d3.forceCenter(w/2,h/2)).force('charge',d3.forceManyBody().strength(-30)).force('collision',d3.forceCollide().radius(x=>x.r+4)).alphaDecay(0.01).velocityDecay(0.6);
+      const grp=g.selectAll('.n').data(nodes).enter().append('g').attr('class','n').style('cursor',x=>x.children?'pointer':'default')
+      .on('mouseenter',(e,x)=>{const t=document.getElementById('tooltip');t.innerHTML=`<b>${x.name}</b><br>${fmt(x.volume)}<br><span class="${x.growth>=0?'pos':'neg'}">${fmtG(x.growth)}</span>`;t.style.left=(e.pageX+12)+'px';t.style.top=(e.pageY-12)+'px';t.classList.add('show');upSidebar(x);})
+      .on('mouseleave',()=>document.getElementById('tooltip').classList.remove('show'))
+      .on('click',(e,x)=>{if(!x.children?.length)return;stack.push({d:node.children||data.children,n:node});render(x.children,x);upCrumb();document.getElementById('back').disabled=false;});
+      grp.append('circle').attr('r',x=>x.r).attr('fill',x=>x.color||'#58a6ff').attr('fill-opacity',0.7).attr('stroke',x=>x.color||'#58a6ff');
+      grp.append('text').attr('text-anchor','middle').attr('dy','0.35em').attr('fill','rgba(255,255,255,0.8)').style('font-size','10px').text(x=>x.r>25?(x.iso3||x.name.slice(0,3).toUpperCase()):'');
+      sim.on('tick',()=>grp.attr('transform',x=>{x.x=Math.max(x.r,Math.min(w-x.r,x.x));x.y=Math.max(x.r,Math.min(h-x.r,x.y));return`translate(${x.x},${x.y})`;}));
+      document.getElementById('count').textContent=`${d.length} ${node?.type==='country'?'Industries':node?.type==='industry'?'Companies':'Countries'}`;}
+    function upCrumb(){let h='<span onclick="resetV()" style="cursor:pointer">Global</span>';stack.forEach((s,i)=>{if(s.n?.name&&s.n.name!=='Global Economy')h+=` / <span onclick="navTo(${i})" style="cursor:pointer">${s.n.name}</span>`;});if(node?.name&&node.name!=='Global Economy')h+=` / ${node.name}`;document.getElementById('crumb').innerHTML=h;}
+    function upSidebar(x){document.getElementById('sidebar').innerHTML=`<div style="font-size:18px;font-weight:600;margin-bottom:16px">${x.name}</div><div class="metric"><div class="metric-label">GDP</div><div class="metric-value">${fmt(x.volume)}</div></div><div class="metric"><div class="metric-label">Growth</div><div class="metric-value ${x.growth>=0?'pos':'neg'}">${fmtG(x.growth)}</div></div>${x.population?`<div class="metric"><div class="metric-label">Population</div><div class="metric-value">${x.population}M</div></div>`:''}${x.children?`<div class="metric"><div class="metric-label">${x.type==='country'?'Industries':'Companies'}</div><div class="metric-value">${x.children.length}</div></div>`:''}`;}
+    function goBack(){if(!stack.length)return;const p=stack.pop();render(p.d,p.n);upCrumb();document.getElementById('back').disabled=stack.length===0;}
+    function resetV(){stack=[];render(data.children,data);upCrumb();document.getElementById('back').disabled=true;}
+    function navTo(i){while(stack.length>i+1)stack.pop();goBack();}
+    document.getElementById('back').onclick=goBack;
+    document.getElementById('reset').onclick=resetV;
+    init();
+  </script>
+  </body>
+</html>html>
+  </script></footer></main></span></h1>
+    </header>
+  </div>
+  </body>
+  </style></title>
+  </head>
